@@ -14,12 +14,31 @@ public class AiServiceClient {
     // AI service base URL
     private static final String AI_BASE_URL = "http://localhost:5000";
     private static final int TIMEOUT_MS = 10000; // 10 seconds
+    
+    // ===== CRITICAL FIX CRT-002: Authentication =====
+    private static final String AI_SERVICE_API_KEY = System.getenv("AI_SERVICE_API_KEY");
+    private static final String AUTH_HEADER_KEY = "X-API-Key";
 
     public AiServiceClient() {
         SimpleClientHttpRequestFactory factory = new SimpleClientHttpRequestFactory();
         factory.setConnectTimeout(TIMEOUT_MS);
         factory.setReadTimeout(TIMEOUT_MS);
         this.restTemplate = new RestTemplate(factory);
+    }
+
+    /**
+     * Create headers with authentication (CRT-002 fix)
+     */
+    private HttpHeaders createAuthenticatedHeaders() {
+        HttpHeaders headers = new HttpHeaders();
+        headers.setContentType(MediaType.APPLICATION_JSON);
+        
+        // Add API key authentication
+        if (AI_SERVICE_API_KEY != null && !AI_SERVICE_API_KEY.isEmpty()) {
+            headers.set(AUTH_HEADER_KEY, AI_SERVICE_API_KEY);
+        }
+        
+        return headers;
     }
 
     // ===========================
@@ -47,9 +66,7 @@ public class AiServiceClient {
     public String generateReport(Object requestBody) {
         try {
             String url = AI_BASE_URL + "/generate-report";
-            HttpHeaders headers = new HttpHeaders();
-            headers.setContentType(MediaType.APPLICATION_JSON);
-            HttpEntity<Object> request = new HttpEntity<>(requestBody, headers);
+            HttpEntity<Object> request = new HttpEntity<>(requestBody, createAuthenticatedHeaders());
 
             ResponseEntity<String> response = restTemplate.exchange(
                     url,
@@ -71,9 +88,7 @@ public class AiServiceClient {
     public String getRecommendations(Object requestBody) {
         try {
             String url = AI_BASE_URL + "/recommend";
-            HttpHeaders headers = new HttpHeaders();
-            headers.setContentType(MediaType.APPLICATION_JSON);
-            HttpEntity<Object> request = new HttpEntity<>(requestBody, headers);
+            HttpEntity<Object> request = new HttpEntity<>(requestBody, createAuthenticatedHeaders());
 
             ResponseEntity<String> response = restTemplate.exchange(
                     url,
@@ -95,9 +110,7 @@ public class AiServiceClient {
     public String describeTask(Object requestBody) {
         try {
             String url = AI_BASE_URL + "/describe";
-            HttpHeaders headers = new HttpHeaders();
-            headers.setContentType(MediaType.APPLICATION_JSON);
-            HttpEntity<Object> request = new HttpEntity<>(requestBody, headers);
+            HttpEntity<Object> request = new HttpEntity<>(requestBody, createAuthenticatedHeaders());
 
             ResponseEntity<String> response = restTemplate.exchange(
                     url,

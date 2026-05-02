@@ -1,7 +1,7 @@
 import os
 import time
 import requests
-import dot0env
+import dotenv
 
 dotenv.load_dotenv()
 

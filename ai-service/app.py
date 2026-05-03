@@ -80,8 +80,8 @@ if __name__ == "__main__":
     debug = os.getenv("FLASK_ENV") == "development"
     
     if debug:
-        # Development: HTTP only
-        app.run(host="127.0.0.1", port=5000, debug=True)
+        # Development: HTTP only, bind to 0.0.0.0 for container accessibility
+        app.run(host="0.0.0.0", port=5000, debug=True)
     else:
         # Production: HTTPS with SSL
         ssl_context = 'adhoc'  # Use proper certificates in production

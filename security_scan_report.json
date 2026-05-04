@@ -1,0 +1,302 @@
+{
+  "metadata": {
+    "scan_date": "2026-05-01T23:58:54.456228",
+    "scanner": "Security Vulnerability Scanner - Day 7",
+    "scanner_version": "1.0",
+    "target": "Tool-109 \u2014 Sprint Board (Kanban)",
+    "components_scanned": [
+      "Flask AI Service (ai-service/)",
+      "Java Backend (backend/)",
+      "Frontend configuration"
+    ]
+  },
+  "executive_summary": {
+    "total_vulnerabilities": 11,
+    "critical_count": 5,
+    "medium_count": 5,
+    "low_count": 1,
+    "overall_risk": "HIGH",
+    "recommendation": "Address all CRITICAL findings immediately before production deployment"
+  },
+  "scan_results": {
+    "scan_date": "2026-05-01T23:58:54.456228",
+    "target_url": "http://localhost:5000",
+    "backend_target": "http://localhost:8080",
+    "total_endpoints_scanned": 5,
+    "endpoints": [
+      {
+        "endpoint": "/health",
+        "method": "GET",
+        "status": "200",
+        "security_score": "C"
+      },
+      {
+        "endpoint": "/test",
+        "method": "GET",
+        "status": "200",
+        "security_score": "B"
+      },
+      {
+        "endpoint": "/generate-report",
+        "method": "POST",
+        "status": "Implemented",
+        "security_score": "B"
+      },
+      {
+        "endpoint": "/recommend",
+        "method": "POST",
+        "status": "Implemented",
+        "security_score": "B"
+      },
+      {
+        "endpoint": "/describe",
+        "method": "POST",
+        "status": "Implemented",
+        "security_score": "B"
+      }
+    ]
+  },
+  "findings_by_severity": {
+    "CRITICAL": [
+      {
+        "id": "CRT-001",
+        "title": "Missing HTTPS Enforcement",
+        "severity": "CRITICAL",
+        "affected": [
+          "Flask AI Service (localhost:5000)"
+        ],
+        "description": "Application runs on HTTP without HTTPS enforcement. Man-in-the-middle attacks possible.",
+        "impact": "Credential theft, data interception, session hijacking",
+        "cve": "CWE-295",
+        "fix_priority": "IMMEDIATE",
+        "fix_steps": [
+          "Enable HTTPS in Flask using SSL/TLS certificates",
+          "Redirect all HTTP to HTTPS",
+          "Configure HSTS headers",
+          "Use secure cookies with HttpOnly and Secure flags"
+        ],
+        "estimated_effort": "2 hours"
+      },
+      {
+        "id": "CRT-002",
+        "title": "No Authentication Between Backend and AI Service",
+        "severity": "CRITICAL",
+        "affected": [
+          "AiServiceClient.java",
+          "Flask endpoints"
+        ],
+        "description": "Backend calls AI service without authentication. Any internal network user can call AI endpoints.",
+        "impact": "Unauthorized access to AI processing, potential API quota abuse",
+        "cve": "CWE-288",
+        "fix_priority": "IMMEDIATE",
+        "fix_steps": [
+          "Implement API key authentication",
+          "Add Bearer token validation in Flask middleware",
+          "Hash and store API keys in database",
+          "Log all API access attempts"
+        ],
+        "estimated_effort": "4 hours"
+      },
+      {
+        "id": "CRT-003",
+        "title": "Missing CORS Protection",
+        "severity": "CRITICAL",
+        "affected": [
+          "Flask app.py"
+        ],
+        "description": "No CORS headers configured. Cross-site requests can access API endpoints.",
+        "impact": "Cross-site request forgery (CSRF), data exfiltration from other domains",
+        "cve": "CWE-352",
+        "fix_priority": "IMMEDIATE",
+        "fix_steps": [
+          "Install flask-cors package",
+          "Configure CORS to allow only frontend domain",
+          "Disable allow-all-origins",
+          "Set proper credentials policy"
+        ],
+        "estimated_effort": "1 hour"
+      },
+      {
+        "id": "CRT-004",
+        "title": "Exposed Sensitive Data in Error Responses",
+        "severity": "CRITICAL",
+        "affected": [
+          "groq_client.py",
+          "routes/report_routes.py"
+        ],
+        "description": "Error messages leak internal system information (API endpoints, stack traces).",
+        "impact": "Information disclosure for attack reconnaissance",
+        "cve": "CWE-209",
+        "fix_priority": "IMMEDIATE",
+        "fix_steps": [
+          "Implement generic error responses",
+          "Log detailed errors server-side only",
+          "Return safe error messages to clients",
+          "Remove stack traces from API responses"
+        ],
+        "estimated_effort": "2 hours"
+      },
+      {
+        "id": "CRT-005",
+        "title": "No Input Validation on Java Backend",
+        "severity": "CRITICAL",
+        "affected": [
+          "backend/controller/ (empty)"
+        ],
+        "description": "Java backend controller is not implemented. No input validation exists.",
+        "impact": "Injection attacks, malformed request handling",
+        "cve": "CWE-20",
+        "fix_priority": "IMMEDIATE",
+        "fix_steps": [
+          "Implement Spring MVC controllers",
+          "Add @Valid annotation for request validation",
+          "Use DTO classes with @NotBlank, @NotNull annotations",
+          "Implement global exception handler"
+        ],
+        "estimated_effort": "8 hours"
+      }
+    ],
+    "MEDIUM": [
+      {
+        "id": "MED-001",
+        "title": "Rate Limiting Not Applied to All Endpoints",
+        "severity": "MEDIUM",
+        "affected": [
+          "Flask app.py"
+        ],
+        "description": "Rate limiting (30/min) only applies to some endpoints. /health endpoint has no limits.",
+        "impact": "Potential DoS attacks on unprotected endpoints",
+        "cve": "CWE-770",
+        "fix_priority": "THIS_SPRINT",
+        "fix_steps": [
+          "Apply rate limiter decorator to all endpoints",
+          "Set different limits for different endpoints",
+          "Monitor and log rate limit violations"
+        ],
+        "estimated_effort": "1.5 hours"
+      },
+      {
+        "id": "MED-002",
+        "title": "Weak Prompt Injection Detection",
+        "severity": "MEDIUM",
+        "affected": [
+          "middleware/security.py"
+        ],
+        "description": "Pattern-based detection is easily bypassed with spaces, Unicode, or alternative phrasing.",
+        "impact": "Attackers can bypass prompt injection filters",
+        "cve": "CWE-95",
+        "fix_priority": "NEXT_SPRINT",
+        "fix_steps": [
+          "Implement semantic analysis instead of regex",
+          "Use ML-based detection model",
+          "Add fuzzy matching for pattern variations",
+          "Test with OWASP top prompt injection payloads"
+        ],
+        "estimated_effort": "6 hours"
+      },
+      {
+        "id": "MED-003",
+        "title": "No API Rate Limiting by User/IP",
+        "severity": "MEDIUM",
+        "affected": [
+          "Flask limiter config"
+        ],
+        "description": "Rate limits are global, not per-user. High-volume attacker not distinguished from legitimate user.",
+        "impact": "Fair-use protection insufficient",
+        "cve": "CWE-770",
+        "fix_priority": "NEXT_SPRINT",
+        "fix_steps": [
+          "Implement per-user rate limiting",
+          "Track usage by API key, not just IP",
+          "Add gradual backoff (exponential)",
+          "Implement request queuing"
+        ],
+        "estimated_effort": "4 hours"
+      },
+      {
+        "id": "MED-004",
+        "title": "Missing Security Headers",
+        "severity": "MEDIUM",
+        "affected": [
+          "Flask app.py"
+        ],
+        "description": "No X-Frame-Options, X-Content-Type-Options, or CSP headers configured.",
+        "impact": "Clickjacking, MIME sniffing attacks",
+        "cve": "CWE-693",
+        "fix_priority": "THIS_SPRINT",
+        "fix_steps": [
+          "Add X-Frame-Options: DENY",
+          "Add X-Content-Type-Options: nosniff",
+          "Add Content-Security-Policy header",
+          "Configure X-XSS-Protection"
+        ],
+        "estimated_effort": "1 hour"
+      },
+      {
+        "id": "MED-005",
+        "title": "Insufficient Input Length Validation",
+        "severity": "MEDIUM",
+        "affected": [
+          "middleware/security.py"
+        ],
+        "description": "500 char limit may be insufficient for complex tasks. No maximum for JSON structure depth.",
+        "impact": "Denial of service via large payloads",
+        "cve": "CWE-400",
+        "fix_priority": "NEXT_SPRINT",
+        "fix_steps": [
+          "Implement request size limits",
+          "Set max JSON nesting depth",
+          "Add timeout for slow clients",
+          "Monitor for unusual payload patterns"
+        ],
+        "estimated_effort": "2 hours"
+      }
+    ],
+    "LOW": [
+      {
+        "id": "LOW-001",
+        "title": "Development Mode Enabled in Production Fallback",
+        "severity": "LOW",
+        "affected": [
+          "app.py line 29"
+        ],
+        "description": "Flask app.run(debug=True) enables development features.",
+        "impact": "Debug information exposure",
+        "cve": "CWE-215",
+        "fix_priority": "NEXT_SPRINT",
+        "recommendation": "Use environment variable to control debug mode"
+      }
+    ]
+  },
+  "remediation_plan": {
+    "immediate": {
+      "priority": "CRITICAL - Address within 24 hours",
+      "findings": [
+        "CRT-001",
+        "CRT-002",
+        "CRT-003",
+        "CRT-004",
+        "CRT-005"
+      ],
+      "estimated_total_effort": "17 hours"
+    },
+    "this_sprint": {
+      "priority": "MEDIUM - Complete this sprint",
+      "findings": [
+        "MED-001",
+        "MED-004"
+      ],
+      "estimated_total_effort": "2.5 hours"
+    },
+    "next_sprint": {
+      "priority": "MEDIUM/LOW - Plan for next sprint",
+      "findings": [
+        "MED-002",
+        "MED-003",
+        "MED-005",
+        "LOW-001"
+      ],
+      "estimated_total_effort": "12 hours"
+    }
+  }
+}

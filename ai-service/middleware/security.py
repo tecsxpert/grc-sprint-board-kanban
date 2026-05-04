@@ -1,5 +1,5 @@
 import re
-from flask import request, jsonify
+from flask import request, jsonify, g
 import logging
 
 # Configure logging
@@ -102,7 +102,8 @@ def security_middleware():
                 logger.warning(f"Excessive JSON nesting from {request.remote_addr}")
                 return jsonify({"error": "Invalid request structure"}), 400
 
-    request.json = data  # Overwrite with sanitized data
+    # Store sanitized data in request context for later use
+    g.sanitized_json = data
     return None
 
 

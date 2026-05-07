@@ -64,6 +64,33 @@ def test_security_middleware_rejects_invalid_json():
     assert response.get_json() == {'error': 'Invalid request'}
 
 
+def test_security_middleware_rejects_missing_api_key():
+    with app.test_request_context(
+        '/recommend',
+        method='POST',
+        json={'tasks': ['task1']},
+    ):
+        result = security.security_middleware()
+
+    assert result is not None
+    response, status_code = result
+    assert status_code == 401
+    assert response.get_json() == {'error': 'Unauthorized'}
+
+
+def test_security_middleware_accepts_valid_api_key(monkeypatch):
+    monkeypatch.setenv('AI_SERVICE_API_KEY', 'valid-key')
+    with app.test_request_context(
+        '/recommend',
+        method='POST',
+        headers={'X-API-Key': 'valid-key'},
+        json={'tasks': ['task1']},
+    ):
+        result = security.security_middleware()
+
+    assert result is None
+
+
 def test_security_middleware_rejects_prompt_injection():
     with app.test_request_context(
         '/generate-report',

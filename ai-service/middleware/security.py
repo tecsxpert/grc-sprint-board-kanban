@@ -1,3 +1,4 @@
+import os
 import re
 from flask import request, jsonify, g
 import logging
@@ -62,10 +63,17 @@ def security_middleware():
     Central security middleware (CRT-002, CRT-004 improvements)
     Validates all incoming requests
     """
-    # Skip security checks for GET requests on health endpoints
-    if request.path in ['/health', '/status'] and request.method == 'GET':
+    # Skip security checks only for unauthenticated status probe
+    if request.path == '/status' and request.method == 'GET':
         return None
-    
+
+    # Validate API key for all other requests
+    api_key = request.headers.get('X-API-Key')
+    expected_key = os.getenv('AI_SERVICE_API_KEY')
+    if not api_key or api_key != expected_key:
+        logger.warning(f"Unauthorized request from {request.remote_addr}")
+        return jsonify({"error": "Unauthorized"}), 401
+
     # Only validate POST/PUT/PATCH requests
     if request.method not in ["POST", "PUT", "PATCH"]:
         return None

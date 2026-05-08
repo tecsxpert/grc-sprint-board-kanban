@@ -31,7 +31,12 @@ class GroqClient:
 
         for attempt in range(retries):
             try:
-                response = requests.post(URL, headers=self.headers, json=data)
+                response = requests.post(
+                        URL,
+                        headers=self.headers,
+                        json=data,
+                        timeout=10,
+                )
 
                 if response.status_code == 200:
                     result = response.json()

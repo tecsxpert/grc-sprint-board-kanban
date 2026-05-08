@@ -1,5 +1,15 @@
 ﻿version: '3.9'
 services:
+  redis:
+    image: redis:7-alpine
+    ports:
+      - "6379:6379"
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
   ai-service:
     build:
       context: ./ai-service
@@ -11,6 +21,10 @@ services:
     environment:
       - FLASK_ENV=development
       - FRONTEND_URL=http://localhost:3000
+      - REDIS_HOST=redis
+    depends_on:
+      redis:
+        condition: service_healthy
     restart: unless-stopped
     healthcheck:
       test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:5000/health').read()"]

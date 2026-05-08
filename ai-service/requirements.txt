@@ -5,3 +5,5 @@ requests==2.31.0
 python-dotenv==1.0.0
 flask-cors==4.0.0
 Groq==0.4.0
+redis==5.0.4
+gunicorn==22.0.0

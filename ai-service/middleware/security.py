@@ -1,124 +1,106 @@
 import re
-from flask import request, jsonify, g
-import logging
+import unicodedata
 
-# Configure logging
-logger = logging.getLogger(__name__)
+from flask import g, request
 
-# Common prompt injection patterns (CWE-95)
-SUSPICIOUS_PATTERNS = [
+from utils.responses import api_response
+from utils.logging_config import get_logger
+
+try:
+    import bleach
+except ImportError:
+    bleach = None
+
+logger = get_logger(__name__)
+
+MAX_CONTENT_LENGTH = 16 * 1024
+MAX_STRING_LENGTH = 4000
+MAX_NESTING_DEPTH = 6
+
+PROMPT_INJECTION_PATTERNS = [
     "ignore previous instructions",
-    "act as",
+    "disregard previous instructions",
     "system prompt",
-    "bypass",
+    "reveal secrets",
+    "bypass rules",
+    "bypass safety",
     "jailbreak",
-    "override",
-    "forget the",
-    "disregard",
-    "counter-instruction"
+    "developer message",
+    "hidden instructions",
+]
+
+DANGEROUS_PATTERNS = [
+    r"<\s*script",
+    r"javascript\s*:",
+    r"\b(drop|delete|truncate)\s+table\b",
+    r"\bunion\s+select\b",
+    r"'\s*or\s*'1'\s*=\s*'1",
 ]
 
 
-def sanitize_input(text):
-    """Sanitize input by removing dangerous content"""
-    # Remove HTML tags (XSS prevention)
-    clean_text = re.sub(r'<.*?>', '', text)
-    
-    # Remove script tags explicitly
-    clean_text = re.sub(r'script|javascript:', '', clean_text, flags=re.IGNORECASE)
-    
-    # Trim spaces
-    clean_text = clean_text.strip()
-
-    return clean_text
+def normalize_text(value: str) -> str:
+    value = unicodedata.normalize("NFKC", value)
+    value = re.sub(r"[\x00-\x08\x0b\x0c\x0e-\x1f]", "", value)
+    return value.strip()
 
 
-def detect_prompt_injection(text):
-    """Detect prompt injection attempts"""
-    text_lower = text.lower()
-    
-    # Remove common obfuscation (spaces, newlines, special chars)
-    text_normalized = re.sub(r'[\s\n\r\t_\-]', '', text_lower)
+def sanitize_input(value: str) -> str:
+    normalized = normalize_text(value)
+    if bleach:
+        return bleach.clean(normalized, tags=[], attributes={}, strip=True)
+    return re.sub(r"<[^>]*>", "", normalized)
 
-    for pattern in SUSPICIOUS_PATTERNS:
-        pattern_normalized = re.sub(r'[\s\n\r\t_\-]', '', pattern)
-        if pattern_normalized in text_normalized:
+
+def detect_prompt_injection(value: str) -> bool:
+    compact = re.sub(r"[\s_\-.:;]+", " ", normalize_text(value).lower())
+    squashed = re.sub(r"[^a-z0-9]+", "", compact)
+    for pattern in PROMPT_INJECTION_PATTERNS:
+        pattern_squashed = re.sub(r"[^a-z0-9]+", "", pattern.lower())
+        if pattern in compact or pattern_squashed in squashed:
             return True
-
     return False
 
 
-def sanitize_error(message, show_details=False):
-    """Sanitize error messages (CRT-004 fix)"""
-    if show_details:
-        return message  # Server-side logging only
-    
-    # Return generic error to client
-    return "Processing failed"
+def detect_dangerous_content(value: str) -> bool:
+    normalized = normalize_text(value).lower()
+    return any(re.search(pattern, normalized, re.IGNORECASE) for pattern in DANGEROUS_PATTERNS)
+
+
+def sanitize_json(value, depth=0):
+    if depth > MAX_NESTING_DEPTH:
+        raise ValueError("JSON nesting depth exceeded")
+    if isinstance(value, dict):
+        return {str(key): sanitize_json(item, depth + 1) for key, item in value.items()}
+    if isinstance(value, list):
+        return [sanitize_json(item, depth + 1) for item in value]
+    if isinstance(value, str):
+        if len(value) > MAX_STRING_LENGTH:
+            raise ValueError("Input too long")
+        if detect_prompt_injection(value) or detect_dangerous_content(value):
+            raise ValueError("Invalid input")
+        return sanitize_input(value)
+    return value
 
 
 def security_middleware():
-    """
-    Central security middleware (CRT-002, CRT-004 improvements)
-    Validates all incoming requests
-    """
-    # Skip security checks for GET requests on health endpoints
-    if request.path in ['/health', '/status'] and request.method == 'GET':
+    if request.content_length and request.content_length > MAX_CONTENT_LENGTH:
+        logger.warning("request_too_large", path=request.path, remote_addr=request.remote_addr)
+        return api_response(False, message="Request body too large", status_code=400)
+
+    if request.method not in {"POST", "PUT", "PATCH"}:
         return None
-    
-    # Only validate POST/PUT/PATCH requests
-    if request.method not in ["POST", "PUT", "PATCH"]:
-        return None
-    
-    # Check for valid JSON
+
     if not request.is_json:
-        logger.warning(f"Invalid content-type from {request.remote_addr}: {request.content_type}")
-        return jsonify({"error": "Invalid request"}), 400
-    
+        return api_response(False, message="Content-Type must be application/json", status_code=400)
+
     data = request.get_json(silent=True)
-
     if not data:
-        logger.warning(f"Empty request body from {request.remote_addr}")
-        return jsonify({"error": "Invalid request"}), 400
+        return api_response(False, message="Request JSON body is required", status_code=400)
 
-    # Validate each field (CRT-005 improvement)
-    for key, value in data.items():
-        if isinstance(value, str):
-            # Length check (CWE-400 prevention)
-            if len(value) > 500:
-                logger.warning(f"Oversized input from {request.remote_addr}: {len(value)} chars")
-                return jsonify({"error": "Input too long"}), 400
+    try:
+        g.sanitized_json = sanitize_json(data)
+    except ValueError as exc:
+        logger.warning("input_rejected", reason=str(exc), path=request.path, remote_addr=request.remote_addr)
+        return api_response(False, message=str(exc), status_code=400)
 
-            # Prompt injection detection (CWE-95)
-            if detect_prompt_injection(value):
-                logger.warning(f"Prompt injection attempt from {request.remote_addr}")
-                return jsonify({"error": "Invalid input"}), 400
-
-            # Sanitize input
-            data[key] = sanitize_input(value)
-        elif isinstance(value, dict):
-            # Check nesting depth (CRT-005 fix)
-            if _check_nesting_depth(value) > 5:
-                logger.warning(f"Excessive JSON nesting from {request.remote_addr}")
-                return jsonify({"error": "Invalid request structure"}), 400
-
-    # Store sanitized data in request context for later use
-    g.sanitized_json = data
     return None
-
-
-def _check_nesting_depth(obj, current_depth=0, max_depth=10):
-    """Check JSON nesting depth (CRT-005 DoS prevention)"""
-    if current_depth > max_depth:
-        return current_depth
-    
-    if isinstance(obj, dict):
-        if not obj:
-            return current_depth
-        return max(_check_nesting_depth(v, current_depth + 1) for v in obj.values())
-    elif isinstance(obj, list):
-        if not obj:
-            return current_depth
-        return max(_check_nesting_depth(item, current_depth + 1) for item in obj)
-    else:
-        return current_depth

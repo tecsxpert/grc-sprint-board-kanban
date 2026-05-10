@@ -15,6 +15,7 @@ Comprehensive security vulnerability scan completed using Python-based security 
 ## Deliverables
 
 ### 1. Security Scan Report
+
 - **File:** `security_scan_report.json` (JSON format)
 - **File:** `ai-service/security_scanner.py` (Scan tool)
 - **Vulnerabilities Found:** 5 CRITICAL, 5 MEDIUM, 1 LOW (11 total)

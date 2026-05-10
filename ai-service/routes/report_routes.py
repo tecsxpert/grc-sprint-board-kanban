@@ -1,116 +1,91 @@
-from flask import Blueprint, jsonify, request, g
+from pathlib import Path
+
+from flask import Blueprint, g, request
+
 from services.groq_client import GroqClient
-import os
+from utils.logging_config import get_logger
+from utils.responses import api_response
 
 report_bp = Blueprint("report", __name__)
+logger = get_logger(__name__)
+PROMPT_DIR = Path(__file__).resolve().parent.parent / "prompts"
 
-# Initialize Groq client
-groq_client = GroqClient()
 
-def load_prompt(filename):
-    """Load prompt template from file"""
-    prompt_path = os.path.join(os.path.dirname(__file__), '..', 'prompts', filename)
-    with open(prompt_path, 'r') as f:
-        return f.read().strip()
+def load_prompt(filename: str) -> str:
+    return (PROMPT_DIR / filename).read_text(encoding="utf-8").strip()
 
-@report_bp.route("/test", methods=["GET"])
-def test_route():
-    return jsonify({"message": "Report route working"})
 
-@report_bp.route("/recommend", methods=["POST"])
-def recommend():
-    """AI-powered task recommendations for sprint planning"""
-    try:
-        data = getattr(g, 'sanitized_json', request.get_json())
-        if not data or 'tasks' not in data:
-            return jsonify({"error": "Missing 'tasks' field in request"}), 400
+def request_json():
+    return getattr(g, "sanitized_json", None) or request.get_json(silent=True) or {}
 
-        tasks = data['tasks']
-        prompt_template = load_prompt('recommend_prompt.txt')
 
-        # Format tasks for the prompt
-        tasks_text = "\n".join([f"- {task}" for task in tasks])
-        full_prompt = f"{prompt_template}\n\nTASKS TO ANALYZE:\n{tasks_text}"
+def groq_content(result: dict) -> tuple[dict, str, int]:
+    if result.get("success"):
+        return {"content": result["data"]["content"], "model": result["data"]["model"]}, "AI response generated", 200
+    return {"is_fallback": True}, result.get("message", "AI service temporarily unavailable"), 503
 
-        recommendation = groq_client.generate_response(full_prompt)
 
-        return jsonify({
-            "recommendation": recommendation,
-            "model": "llama-3.3-70b-versatile",
-            "endpoint": "/recommend"
-        })
+@report_bp.get("/health")
+def health():
+    return api_response(True, {"status": "healthy"}, "AI service running")
 
-    except Exception as e:
-        return jsonify({"error": f"AI recommendation failed: {str(e)}"}), 500
 
-@report_bp.route("/generate-report", methods=["POST"])
-def generate_report():
-    """AI-powered sprint report generation"""
-    try:
-        data = getattr(g, 'sanitized_json', request.get_json())
-        if not data:
-            return jsonify({"error": "Request body required"}), 400
+@report_bp.get("/status")
+def status():
+    return api_response(True, {"status": "operational"}, "AI service operational")
 
-        prompt_template = load_prompt('generate_report_prompt.txt')
 
-        # Build context from request data
-        context_parts = []
-        if 'sprint_name' in data:
-            context_parts.append(f"SPRINT: {data['sprint_name']}")
-        if 'completed_tasks' in data and 'total_tasks' in data:
-            completion_rate = (data['completed_tasks'] / data['total_tasks']) * 100
-            context_parts.append(f"COMPLETION: {data['completed_tasks']}/{data['total_tasks']} tasks ({completion_rate:.1f}%)")
-        if 'team_size' in data:
-            context_parts.append(f"TEAM SIZE: {data['team_size']} members")
-        if 'key_deliverables' in data:
-            deliverables = "\n".join([f"- {d}" for d in data['key_deliverables']])
-            context_parts.append(f"KEY DELIVERABLES:\n{deliverables}")
-
-        context = "\n".join(context_parts)
-        full_prompt = f"{prompt_template}\n\nSPRINT DATA:\n{context}"
-
-        report = groq_client.generate_response(full_prompt)
-
-        return jsonify({
-            "report": report,
-            "model": "llama-3.3-70b-versatile",
-            "endpoint": "/generate-report"
-        })
-
-    except Exception as e:
-        return jsonify({"error": f"Report generation failed: {str(e)}"}), 500
-
-@report_bp.route("/describe", methods=["POST"])
+@report_bp.post("/describe")
 def describe():
-    """AI-powered task description generation"""
-    try:
-        data = getattr(g, 'sanitized_json', request.get_json())
-        if not data or 'task_title' not in data:
-            return jsonify({"error": "Missing 'task_title' field in request"}), 400
+    data = request_json()
+    task_title = data.get("task_title")
+    if not isinstance(task_title, str) or not task_title.strip():
+        return api_response(False, message="task_title is required", status_code=400)
 
-        task_title = data['task_title']
-        prompt_template = load_prompt('describe_prompt.txt')
+    prompt = load_prompt("describe_prompt.txt").format(
+        task_title=task_title,
+        business_context=data.get("business_context", "Not provided"),
+        current_state=data.get("current_state", "Not provided"),
+        requirements="\n".join(f"- {item}" for item in data.get("requirements", [])) or "Not provided",
+    )
+    payload, message, status_code = groq_content(GroqClient().generate_response(prompt, temperature=0.25))
+    return api_response(status_code == 200, {"description": payload}, message, status_code)
 
-        # Build context from request data
-        context_parts = [f"TASK TITLE: {task_title}"]
-        if 'business_context' in data:
-            context_parts.append(f"BUSINESS CONTEXT: {data['business_context']}")
-        if 'current_state' in data:
-            context_parts.append(f"CURRENT STATE: {data['current_state']}")
-        if 'requirements' in data:
-            reqs = "\n".join([f"- {r}" for r in data['requirements']])
-            context_parts.append(f"REQUIREMENTS:\n{reqs}")
 
-        context = "\n".join(context_parts)
-        full_prompt = f"{prompt_template}\n\nTASK DETAILS:\n{context}"
+@report_bp.post("/recommend")
+def recommend():
+    data = request_json()
+    tasks = data.get("tasks")
+    if not isinstance(tasks, list) or not tasks:
+        return api_response(False, message="tasks must be a non-empty list", status_code=400)
 
-        description = groq_client.generate_response(full_prompt)
+    prompt = load_prompt("recommend_prompt.txt").format(
+        tasks="\n".join(f"- {task}" for task in tasks),
+        sprint_goal=data.get("sprint_goal", "Not provided"),
+        team_capacity=data.get("team_capacity", "Not provided"),
+    )
+    payload, message, status_code = groq_content(GroqClient().generate_response(prompt, temperature=0.2))
+    return api_response(status_code == 200, {"recommendation": payload}, message, status_code)
 
-        return jsonify({
-            "description": description,
-            "model": "llama-3.3-70b-versatile",
-            "endpoint": "/describe"
-        })
 
-    except Exception as e:
-        return jsonify({"error": f"Task description failed: {str(e)}"}), 500
+@report_bp.post("/generate-report")
+def generate_report():
+    data = request_json()
+    sprint_name = data.get("sprint_name")
+    if not isinstance(sprint_name, str) or not sprint_name.strip():
+        return api_response(False, message="sprint_name is required", status_code=400)
+
+    total_tasks = int(data.get("total_tasks", 0) or 0)
+    completed_tasks = int(data.get("completed_tasks", 0) or 0)
+    if total_tasks < 0 or completed_tasks < 0 or completed_tasks > max(total_tasks, 0):
+        return api_response(False, message="task counts are invalid", status_code=400)
+
+    prompt = load_prompt("generate_report_prompt.txt").format(
+        sprint_name=sprint_name,
+        completed_tasks=completed_tasks,
+        total_tasks=total_tasks,
+        blockers="\n".join(f"- {item}" for item in data.get("blockers", [])) or "None reported",
+        key_deliverables="\n".join(f"- {item}" for item in data.get("key_deliverables", [])) or "Not provided",
+    )
+    payload, message, status_code = groq_content(GroqClient().generate_response(prompt, temperature=0.25, max_tokens=900))
+    return api_response(status_code == 200, {"report": payload}, message, status_code)
